@@ -131,3 +131,114 @@ We can confirm release binary of kubernetes engine using the sha512sum command. 
         sha512sum -a <kubernetes-release-binary>
 
 After doing this, you can check the official doc page to confirm if your source code matches with the one on your system.
+
+---------------------------------------------------------------------------------------------------------------------------
+Reference-links:
+https://github.com/kubernetes/kubernetes/releases
+
+https://github.com/kubernetes/design-proposals-archive/blob/main/release/versioning.md
+
+https://github.com/kubernetes/design-proposals-archive/blob/main/api-machinery/api-group.md
+
+https://blog.risingstack.com/the-history-of-kubernetes/
+
+https://kubernetes.io/docs/setup/version-skew-policy
+
+Cluster Upgrade Process:
+In a k8s release version, all components have similar version numbers. Which means components such as the kube-apiserver, controller-manager,kube-scheduler,kubelet all have the ame version number. While the ETCD and coreDNS have different version numbers because they are managed differently. The kube-api server has the highest version update because it is the main component every other component talks to. other components could be two versions or one version lower but not higher than the kube-apiserver version. The kubectl doesn't follow this rule. The kubectl can be a version higher or lower than the kube-api-server or even two version lower than the kube-apiserver.
+
+upgrading your cluster using the kubeadm tool:
+NOTE: the kubeadm does not upgrade kubelets on worker nodes, this should be done seperately on each worker node.
+1. Get information about kubeadm, latest version and updates available:
+
+        kubeadm upgrade plan
+
+2. Download latest update of kubeadm
+
+        apt-get upgrade -y kubeadm=<version>
+
+3. Apply update on kubeadm: 
+        kubeadm upgrade apply <version>
+
+4. upgrade the kubelet on master node:
+
+        apt-get upgrade -y kubelet=<version>
+
+5. Restart kubelet:
+        systemctl restart kubelet.service
+-----------------------------------------------------------------------------------------------------------------
+Upgrading the worker Node:
+apt-get update && apt-get install -y kubeadm='1.27.0-00' && \
+apt-mark hold kubeadm
+
+1. drain worker node.
+
+        kubectl drain <worker-node-name>
+
+2. upgrade kubeadm tool on nodes:
+
+        apt-get upgrade -y kubeadm=<1.2x.x-00>
+
+3. upgrade kubelet:
+
+        apt-get upgrade -y kubelet=<version>
+
+4. upgrade kubelet node configuration:
+
+        kubeadm upgrade node config --kubelet-version v1.12.0
+
+5. Restart kubelet service:
+
+        systemctl restart kubelet.service
+
+6. Mark nodes schedulable:
+
+        kubectl uncordon node-1
+
+==============================================================================================
+Network policies in kubernetes is a resource type that helps a kube-admin restrict access to 
+applications hosted on pods within your cluster. This implementation can help in different scenerios such as restricting the web application pod from accessing the database pods in your cluster. 
+
+Here's an example of a network policy resource file:
+
+                apiVersion: networking.k8s.io/v1
+                kind: NetworkPolicy
+                metadata:
+                name: test-network-policy
+                namespace: default
+                spec:
+                 podSelector:
+                  matchLabels:
+                        role: db
+                policyTypes:
+                - Ingress
+                - Egress
+                   ingress:
+                        - from:
+                          - ipBlock:
+                                cidr: 172.17.0.0/16
+       
+                - namespaceSelector:
+                   matchLabels:
+                     project: myproject
+                - podSelector:
+                   matchLabels:
+                    role: frontend
+                ports:
+                - protocol: TCP
+                  port: 6379
+                 egress:
+                 - to:
+                   - ipBlock:
+                     cidr: 10.0.0.0/24
+                   ports:
+                   - protocol: TCP
+                     port: 5978
+
+podSelector: Each NetworkPolicy includes a podSelector which selects the grouping of pods to which the policy applies. The example policy selects pods with the label "role=db". An empty podSelector selects all pods in the namespace.
+
+policyTypes: Each NetworkPolicy includes a policyTypes list which may include either Ingress, Egress, or both. The policyTypes field indicates whether or not the given policy applies to ingress traffic to selected pod, egress traffic from selected pods, or both. If no policyTypes are specified on a NetworkPolicy then by default Ingress will always be set and Egress will be set if the NetworkPolicy has any egress rules.
+
+ingress: Each NetworkPolicy may include a list of allowed ingress rules. Each rule allows traffic which matches both the from and ports sections. The example policy contains a single rule, which matches traffic on a single port, from one of three sources, the first specified via an ipBlock, the second via a namespaceSelector and the third via a podSelector.
+
+egress: Each NetworkPolicy may include a list of allowed egress rules. Each rule allows traffic which matches both the to and ports sections.
