@@ -258,14 +258,14 @@ For your ingress to work in your kubernetes cluster you will need an ingress con
 Ingress resource:
  An ingress resource is a set of configuration and rules applied on an ingress controller, you can configure rules to forward traffic to a single application or set of applications.
 
-        ```
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
+        
+ apiVersion: networking.k8s.io/v1
+ kind: Ingress
+ metadata:
   name: minimal-ingress
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
-spec:
+ spec:
   ingressClassName: nginx-example
   rules:
   - http:
@@ -279,9 +279,161 @@ spec:
               number: 80
 
 
-        ```
+        
 
 Creating an nginx ingress-controller:
 1. Create a namespace called ingress-nginx
-`kubectl create ns ingress-nginx`
 
+     kubectl create ns ingress-nginx
+
+2. The NGINX Ingress Controller requires a ConfigMap object. Create a ConfigMap object with name ingress-nginx-controller in the ingress-nginx namespace.
+
+3. The NGINX Ingress Controller requires two ServiceAccounts. Create both ServiceAccount with name ingress-nginx and ingress-nginx-admission in the ingress-nginx namespace.
+
+        kubectl create sa -n ingress-nginx ingress-nginx ingress-nginx-admission
+
+4. create RBAC authorization.
+                apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  creationTimestamp: "2024-02-18T14:36:06Z"
+  labels:
+    app.kubernetes.io/instance: ingress-nginx
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/part-of: ingress-nginx
+    app.kubernetes.io/version: 1.1.2
+    helm.sh/chart: ingress-nginx-4.0.18
+  name: ingress-nginx
+  resourceVersion: "1274"
+  uid: ccb55434-3b82-476f-8863-47e0cef00734
+ rules:
+ - apiGroups:
+   - ""
+   resources:
+    - configmaps
+    - endpoints
+    - nodes
+    - pods
+    - secrets
+    - namespaces
+   verbs:
+   - list
+   - watch
+    - apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingresses
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingresses/status
+  verbs:
+  - update
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingressclasses
+  verbs:
+  - get
+  - list
+  - watch
+
+
+
+
+
+        
+        
+
+
+--------------------------------------------------------------------------------------------------------------------
+
+NOTE: Docker server configuration:
+The docker cli runs the docker daemon as a service in the background, this helps us to manage the docker configuration and set security measures using the daemon.json file located at /etc/docker/ directory. It contains path to tls certificates used for authenticating users that can communicate with the docker cli engine.
+
+SYSTEM HARDENING:
+
+A way to limit threats and reduce attack surface is to keep all systems in the cluster in a simple and consistent state.
+if a node that's part of a cluster gets poorly configured can lead the whole system to a possibilty of attacks.
+
+Limited Access To Nodes:
+
+A well recognised method of limiting access to the controlplane node isby deploying the node in a private network. for managed kubernetes service it is possible that you will have no access to the control plane components, but this is not the same for self-hosted kubernetes engines. Another option is to enable authorized networks within the infrastructure firewall. This is applied based on the source ip address range that we can define on the infrastructure firewall.
+Access to Nodes? 
+account types: 
+ - user accounts: bob,michael, grey etc.
+ - superuser accounts: UID=0, root user access.
+ - systemAccounts: created during OS creation and mainly used by softwares and services,they do not run as superuser.
+ - serviceAccounts: similar to system accounts and are created when services are installed e.g nginx apache http etc.
+
+/etc/passwd contains information about users account in the system.
+/etc/shadow - contains the users account passwords. the content of this file is hashed.
+/etc/group - contains information about groups that users belong to.
+
+With the knowledge of what contents are stored in the above files, we can control access to our host system by taking actions like deleting unwanted users with the usermod command.
+
+                usermod -s /bin/nologin <username>
+                userdel <username>
+
+We can also remove user from groups they shouldnt belong to:
+
+                deluser <username> <groupname>
+
+We can also improve the security of our nodes by securing the SSH service:
+Accessing a server can be done using username and password or by using cryptographic key pairs (public and private). The SSH service is an inbuilt system service that authenticates user access into the system.
+generating keypairs for remote access:
+
+//creates two keys public and private. public can be shared but not the private.
+
+        ssh-keygen -t rsa
+
+        ssh-copy-id -i <username@ipaddress>
+
+Hardening ssh for root account:
+
+To disable root ssh, update the ssh configuration file located at /etc/ssh/ssh/sshd_config and update the root login permission to no:
+
+                PermitRootLogin no
+
+We can also disable password authenticationa and allow ssh login via sshkeys only:
+
+                PasswordAuthentication no
+
+To escalate user priviledges we can make use of `sudo` . The sudo config file can be found in the /etc/sudoers file.
+To add users to be able to use sudo, eit the /etc/sudoers file and add:
+                <username> ALL=(ALL:ALL) ALL
+                <username> ALL=(ALL:ALL) NOPASSWD:ALL
+
+Ensure that the public key of the client server is copied to the remote server.
+
+RBAC access.
+Remove obsolete packages and services.
+Restrict Network access.
+Restrict obsolete kernel modules.
+identify and fix open ports.
