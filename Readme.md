@@ -244,3 +244,44 @@ ingress: Each NetworkPolicy may include a list of allowed ingress rules. Each ru
 egress: Each NetworkPolicy may include a list of allowed egress rules. Each rule allows traffic which matches both the to and ports sections.
 
 ---------------------------------------------------------------
+
+Ingress:
+Ingress helps users access your application using a single Externally accessible URL that you can configure to route to different services within your cluster, At the same time implementing SSL security.
+
+For your ingress to work in your kubernetes cluster you will need an ingress controller. An ingress controller is responsible for managing inbound traffic to the Kubernetes cluster. It acts as a gateway, handling external requests and routing them to appropriate services within the cluster based on defined rules and configurations. There are different examples of controllers such as NGINX, TRAEFIK etc. USing NGINX controller, we have certain resources For configuring the an ingress controller on your cluster:
+
+- Deployment.
+- Service.
+- ConfigMap 
+- Auth
+
+Ingress resource:
+ An ingress resource is a set of configuration and rules applied on an ingress controller, you can configure rules to forward traffic to a single application or set of applications.
+
+        ```
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: minimal-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx-example
+  rules:
+  - http:
+      paths:
+      - path: /testpath
+        pathType: Prefix
+        backend:
+          service:
+            name: test
+            port:
+              number: 80
+
+
+        ```
+
+Creating an nginx ingress-controller:
+1. Create a namespace called ingress-nginx
+`kubectl create ns ingress-nginx`
+
