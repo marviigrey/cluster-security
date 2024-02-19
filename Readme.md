@@ -432,8 +432,43 @@ To add users to be able to use sudo, eit the /etc/sudoers file and add:
 
 Ensure that the public key of the client server is copied to the remote server.
 
-RBAC access.
-Remove obsolete packages and services.
+
+Remove obsolete packages and services:
+ We can also keep our system safe by making sure only required softwares are installed on them, and the ones that are installed are constantly updated to address security fixes. This is because new vulnerabilities are discovered everyday and why we need to constantly update our packages and softwares ina  timely manner.
+ Services are used to start application during a linux system boot. they are managed by the systemd, usin the systemctl,we are able to see the status of our service, start or stop the service. The service configuration files are stored in the /lib/systemd/system directory. If a service is not needed, its advisable to stop or disable the service.
+
+                systemctl list-units --type service
+
+                systemctl disable <servicename>
+
+                systemctl stop <servicename>
+
+                apt remove <packagename>
+
+
+
 Restrict Network access.
-Restrict obsolete kernel modules.
-identify and fix open ports.
+Restrict obsolete kernel modules: 
+The linux kernel module has a modular design that extends it capabilities by the means of dynamically loaded kernel modules. This means that when a hardware device is connected to our system, they can be made available to the users by loading the corresponding kernel modules. It's important to blacklist all modules that are of no use to the kubernetes cluster. this step should be performed on all nodes on the cluster to mitigate vulnerablilties or attack to our network related modules. Blacklisting is a context of kernel modules as a mechanism to prevent the kernel module from loading. 
+
+        modprobe <module name>
+        lsmod //list all available module
+
+To balcklist a module that's of no use,add the module name to `/etc/modprobe.d/blacklist.conf`. e.g
+
+        cat /etc/modprobe.d/blacklist.conf
+        blacklist sctp
+        blacklist dccp
+
+The module `sctp`  and `dccp`are of no use to k8s cluster so it's therefore blacklisted. reboot the system and run `lsmod` to confirm if the modules are available or not.
+
+identify and fix open ports:
+when several processes are started on a system, they are mostly bound to a port. A port is an addressable location in the OS that allows the segregation of network traffic intended for different applications. to check if ports are used and listening for requests run:
+
+        netstat -an | grep -w LISTEN
+
+/etc/services file stores information about services in our system, to get what service is running on a particular pport we can run
+
+        cat /etc/services/ | grep -w <portnumber>
+
+
