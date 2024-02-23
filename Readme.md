@@ -472,3 +472,94 @@ when several processes are started on a system, they are mostly bound to a port.
         cat /etc/services/ | grep -w <portnumber>
 
 
+Minimize IAM policies and Role:
+
+In the previous writeup, we explained how we can protect our self-hosted k8s machine using some preventive measures in linux. In a case where we have the k8s engine on a cloud platform like aws, we make use of identity access management to control access to our cloud platform user interface. It's never adviced to control or use any k8s resources. It's better to use an IAM user to control all operations. An attack on the root account will compromise every resource within the cloud platform. The root user account should only be used to create IAM user which will be used to operate our clusters.
+Also we can make use of permissions and policies to control access and priviledges on our cloud platform. We make use of IAM role to have our resources within the cloud to integrate with themselves. 
+
+Restrict Network Access:
+In a real world scenario where we have so many network configuration, involving multiple network switches and routers, it is important to implement a network security policy to help restrict access to services and ports. We can apply security firewalls such as cisco ASA,juniper NGFW, Barracuda NGFW, fortinet etc. Using these firewalls, you can define rules that will control any traffic flowing in and out of the network. Alternatively, we can attach these policies at individual servers level using IPtables,FireWallD,NuFW and firewalls in windows servers.
+
+UFW: Uncomplicated Firewall.
+If we have apps or softwares running on a linux system and we want specific network settings like allowing only 2 ports opened, one for clients and the other for endusers accessing application running on our linux system. To achieve this , we make use of netfilter, an internal packet filtering system available in the linux kernel.
+Installing the UFWon ubuntu:
+- update apt package manager.
+
+                sudo apt-get update
+
+- Install ufw
+
+                sudo apt-get install ufw
+
+- enable ufw
+
+                systemctl enable ufw
+
+- start the ufw service.
+
+                systemctl start ufw
+
+- Check status of the ufw
+
+                ufw status
+
+Configuring the ufw to allow all outgoing and deny all incoming requests:
+
+        ufw default allow outgoing
+
+        ufw default deny incoming
+
+To allow inbound connection from a specific ip address through the port specified, using UFW run:
+
+        ufw allow from <ipaddr> to any port 22 proto tcp
+
+You can also pass this rule to cidr blocks and not just a specific ip.:
+
+        ufw allow from 172.16.100.0/28 to any port 22 proto tcp
+
+YOu can deny any connection coming from a specific port:
+
+        ufw deny 8080
+
+
+To activate the firewall after setting these rules run:
+
+        ufw enable
+
+        ufw status
+
+To delete a specific rule:
+
+        ufw delete deny 8080
+
+
+Linux Syscalls:
+
+a kernel is one of the most important component of an operating system. It is the core interface between a computer's hardware and it's processes, It communicates between the two, managing resources as efficiently as possible.
+kernel memory area:
+- kernel space: Kernel code, Kernel Extensions, Device drivers .
+- user space: programming languages such as python C java Ruby etc.
+
+Applications running in the user space get access to data on the device by making special requests to the kernel. this process is called system calls.
+
+Tracing System Calls:
+Strace: the "strace" utility is installed in most linux distro and it is useful to trace the system calls used by an application, and the signals written back to it.Example: 
+
+                strace touch /tmp/error.log
+
+The result of this command provides information such as the syscall name, the arguement passed to the syscall and the written status.
+
+To trace a ssycall process,we first need to identify the PID of the process, example:
+
+                pidof <process>
+
+        #take the id of the process and run:
+
+        strace -p <PiD>
+
+Run this command to view all syscall of any process:
+
+                strace -c touch /tmp/error.log
+This will display a list of syscalls the "touch /tmp/error.log" command can make.
+
+
