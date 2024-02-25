@@ -562,4 +562,99 @@ Run this command to view all syscall of any process:
                 strace -c touch /tmp/error.log
 This will display a list of syscalls the "touch /tmp/error.log" command can make.
 
+AquaSec Tracee:
+Tracee is an open-source tool created by Aqua Security that makes use of EBPF to trace the system at runtime.
+EBPF stans for "Extended Berkerley Packet Filter" that runs programs directly on linux kernels space without interfering with the kernel source code or loading any kernel module.
+We can run the Aqua tracee as a docker container instead of going through the stress of installing it using system dependencies.
+Tracee needs priviledged capabilities to perform tracing when running as a docker container so passing the --priviledged additional capability when running on docker container helps add the ability.
+
+Restricting Syscalls with seccomp:
+A system with too many syscalls opened stands the risk of getting attacked, one possible way to mitigate the risk is by restricting syscalls that are not needed by an application.
+By default, the linux kernel will allow any syscall to be invokedvby programs running in the userspace which can increase the attack surface.
+SECCOMP: Secure Computing which is a linux kernel level feature that can be used to sandbox applications to only use the syscalls they need.
+To check if your OS supports seccomp, check your boot config file by running:
+
+                grep -i seccomp /boot/config-$(uname -r)
+
+        response:
+                node:~/cluster-security$ grep -i seccomp /boot/config-$(uname -r)
+                CONFIG_HAVE_ARCH_SECCOMP=y
+                CONFIG_HAVE_ARCH_SECCOMP_FILTER=y
+                CONFIG_SECCOMP=y
+                CONFIG_SECCOMP_FILTER=y
+                # CONFIG_SECCOMP_CACHE_DEBUG is not set
+
+Tesiing the seccomp:
+1. run a simple docker container and exec into it:
+        docker run -it --rm docker/whalesay /bin/sh
+2. Get the PID 
+
+        ps -ef
+
+3. test the seccomp mode by changing the date.
+
+        date -s '19 APR 2012 00:00:00' 
+
+You will get an error like this:
+"date: cannot set date: Operation not permitted
+Thu Apr 19 00:00:00 UTC 2012".
+
+Reason being that the container which we used in making the test is a docker container, docker containers have an in-built seccomp filter which is used by default provided that the host kernel has seccomp enabled.
+
+Seccomps mode: 
+Mode 0 - DISABLED - This implies that seccomp is disabled.
+MOde 1 - STRICT - Seccomp will block all syscalls except from 4: read, write, exit and cigratte
+Mode 2 - FILTERED: seccomps is operating i the system.
+
+A seccomp whitelist filter document contains 3 objects:
+1. systems architecture, e.g 32bit.
+2. syscalls arrays: defines syscalls name and associated sction either to allow or deny a syscall.
+3. Default array: specifies actions to be taken on syscalls that have not been declared in the syscall array. This will reject all other syscalls by default.
+
+Another syscall profile type called the blaclist.json doc. It does the exact opposite of everything the whitelist does, it allows all syscalls by default and denies the syscalls defined in the syscall array.
+Blacklist profile are way more open than the whitelist, also they are more susceptible to attacks as they allow all syscalls by default, if a potentially dangerous syscall is not added to the blacklist, this can lead to security incident.
+The default docker seccomp setting blocks about 60 of the 300 plus syscalls  on the x86 achitecture.
+Another thing to note that you can have or create a custom syscall that you can use for your containers aside the default seccomp file. instead when running the container, we can parse it as a flag like this:
+
+                docker run -it --rm --security-opt seccomp=/root/custom.json \ docker/whalesay /bin/sh
+
+To make use of syscalls within a container we can set the seccomp flag to "uconfined". This will allow all syscalls within the container.
+
+                docker run -it --rm --security-opt seccomp=unconfined \ docker/whalesay /bin/sh
+Note: the above method should never be used and we should resort to using custom profile to restrict or allow specific syscalls when necessary. There are additional security gates built into docker which prevent you from running several syscalls even with seccomp disabled. Even if you try it with a second profile it won't work.
+
+Implementing seccomps in kubernetes:
+Firstly testing if seccomp is configured in your container orchestrator using an opensource tool called amicontained. It is a tool designed to help understand and validate the container environment in which it runs. It's particularly useful for security auditing, compliance, and ensuring that containers adhere to best practices. It provides an important information such as syscalls that are blocked, seccomp mode etc. 
+To run it on your docker environment, run:
+
+        docker run --rm -it r.j3ss.co/amicontained
+
+On kubernetes, run as a pod: 
+
+        kubectl run amicontained --image r.j3ss.co/amicontained amicontained -- amicontained
+
+        kubectl logs amicontained
+
+For resources in a kubernetes environment, seccomp is disabled by default but you can add them to a resource definition file under the security context field:
+
+        apiVersion: v1
+        kind: Pod
+        metadata:
+                name: default-pod
+                labels:
+                app: default-pod
+        spec:
+                securityContext:
+                        seccompProfile:
+                                type: RuntimeDefault
+                 containers:
+                - name: test-container
+                image: hashicorp/http-echo:1.0
+                args:
+                -   "-text=just made some more syscalls!"
+                securityContext:
+                  allowPrivilegeEscalation: false
+
+ 
+=====================================================================================================================
 
