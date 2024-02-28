@@ -879,9 +879,95 @@ To add an admission controller to your cluster, update the `- --enable-admission
 
                 - --enable-admission-plugins=<admission-controller-name>
 
+Validating and mutating admission controllers:
+
+Validating: Just as the `NamespaceLifecycle` admission controller, it validates a namespace if it exists and reject the request if it doesnt exist. This is what the validating admission controller does.
+
+Mutating : for the mmutating, it can changee or mutate the object itself before it's created.
+
+Validating controllers are invoked first before the mutating controllers. 
+
+MutatingAdmissionWebhook, ValidatingAdmissionWebhook:
+We can configure this webhooks on a server that's either within the cluster or outside it. Our server  will have our own admission webhook service running with our own code and logic
+Kubernetes supports external admission controllers that we can use for mutation and validation namely MutatingAdmissionWebhook and ValidatingAdmissionWebhook. 
+
+Steps to deploy admission controller:
+- Develop a webhook server using and programming language of your choice.
+- host your webhook server on vm or containerize it and run it on your kubernetes cluster as a deployment.
+- create a service for the deployment.
+- create a validating admission webhook using a manifest.
+
+        apiVersion: admissionregistration.k8s.io/v1
+        kind: ValidatingWebhookConfiguration
+        metadata:
+         name: "pod-policy.example.com"
+        webhooks:
+        - name: "pod-policy.example.com"
+        rules:
+        - apiGroups:   [""]
+          apiVersions: ["v1"]
+          operations:  ["CREATE"]
+          resources:   ["pods"]
+          scope:       "Namespaced"
+        clientConfig:
+          service:
+         namespace: "example-namespace"
+         name: "example-service"
+         caBundle: <CA_BUNDLE>
+        admissionReviewVersions: ["v1"]
+        sideEffects: None
+        timeoutSeconds: 5
+
+This is an example of an admission controller manifest file. The above file represents a validation controller which means it accepts when requests are made to create pods depending on the response, it can either allow or reject this action.
+
+Pod Security Policies: (DEPRECATED)
+Pod security policy helps us implement certain policies to restrict pods from being created with specific capabilities or priviledges.
+How it works:
+When podSecurityPolicy is enabled in a cluster, the admission controller validates the configuration against the set of preconfigured rules, if it detects a violation of rule, it rejects the request and retrns error to the user. The pod security policy is deployed as an admission controller and can be enabled using the kube-apiserver.yaml file:
+
+        - --enable-admission-plugin=PodSecurityPolicy
+
+- Create a PodSecurityPolicy resource using a manifest file.
+- configure authorization using RBAC: role and  a rolebinding, service account to authorize communication between the admission controller and the kube-api-server.
+
+Pod Security Admission And pod Security Standards:Pod security admission is also similar to the pod security policy, Its an admission controller which is enabled by default. PSA is configured at a namespace level, you do that by applying a label to the namespace.
+Configuring PSA: 3 profiles are built;
+- priviledged: unrestricted policy
+- Baseline: minimal restrictive policy, easy to use and it helps stop users from gaining unauthorized access to higher priviledges.
+- restricted: heavily restricted policy. It focuses on applying the best security measures for pods. Might cause some compatibility issue but ensures stronger security.
 
 
+You can choose either of the three while configuring pod security.
 
+A mode in Pod Security defines what action the control plane takes if the policy is violated.
+- enforce: Reject Pod
+- audit: record in the audit logs
+- warn: Trigger user facing warning.
+
+
+Since PSA are namespace scoped, to apply a security mode on them we use labels, example: enforce a restricted policy on the `payroll` namespace:
+
+        kubectl label ns payroll pod-security.kubernetes.io/enforce=restricted
+
+Open Policy Agent (OPA) is a policy engine that helps you enforce rules and policies across your software infrastructure. It allows you to write and manage policies in a declarative language and evaluate them against incoming requests or data. I
+Install Opa:
+
+                curl -L -o opa https://openpolicyagent.org/downloads/v0.61.0/opa_linux_amd64_static
+
+                chmod 755 ./opa
+
+
+After installing OPA, next step is to load policies using a rego definition file
+To load the profile we run:
+
+  curl -X PUT --data-binary @opa.rego http:///localhost:8181/v1/policies/example1
+
+To view the list of profiles run:
+
+        curl http://localhost:8181/v1/policies
+
+Opa in kubernetes:
+Opa constraint frameworks is a framework that helps us to implement policies by declaring what we want to do, where we want to do and how to do it.
 
 
 
