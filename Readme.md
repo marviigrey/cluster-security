@@ -837,7 +837,7 @@ When you run a docker container, you have the priviledge to define security stan
  We can also configure these settings in kubernetes,at pod or container level. NOTE: settings on the container will override settings on the pod, but they can be configured differently.
 
  Using security context, we can add these security configurations on pods and containers. example:
- # security context at pod level
+        # security context at pod level
         apiVersion:
         kind: Pod
         metadata:
@@ -846,8 +846,9 @@ When you run a docker container, you have the priviledge to define security stan
                 securityContext:
                         runAsUser: 1000
 
-# security context at container level:
-# NOTE: capabilities are only supported at conttainer level and not pod level.
+        # security context at container level:
+
+        # NOTE: capabilities are only supported at conttainer level and not pod level.
         containers:
           - name: ubuntu
             image: ubuntu
@@ -871,7 +872,7 @@ Examples of admission controllers:
 There are many admission controllers, to see a list of admission controllers, run:
         kube-apiserver -h | grep enable-admission-plugins
 
-# in a kubeadm setup run:
+        # in a kubeadm setup run:
 
         kubectl exec kube-apiser-controlplane -n kube-system --kube-apiserver -h | grep enable-admission-plugins
 
@@ -966,49 +967,219 @@ To view the list of profiles run:
 
         curl http://localhost:8181/v1/policies
 
-Opa in kubernetes:
-Opa constraint frameworks is a framework that helps us to implement policies by declaring what we want to do, where we want to do and how to do it.
+Opa in kubernetes(The gatekeepers approach):
+With the gatekeeper approach, the admission controller works hand in hand with the OPA constraint framework.
+
+Opa constraint frameworks is a framework that helps us to implement policies by declaring what we want to do, where we want to do and how to do it. It uses CRD-based policies that lets you set policies in a way that's easy to share and trust.
+
+To install opa gatekeeper, we simply deploy the resources on our kubernetes cluster with a simple command:
+
+        kubectl apply -f https://raw.githubusercontent.com/open-policy-agent/gatekeeper/v3.15.0/deploy/gatekeeper.yaml
+
+Understanding how the frameworks implements policies:
+
+1. What we want to do: 
+What requirements do i have? i want all objects in `payroll` namespace to have a `bill` label.
+how do we enforce the label check? we define the policy in our `rego` code which is the language used by opa as discussed earlier. It will look like this:
+
+        package systemrequiredLabels
+
+        import data.lib.helpers
+
+        violation[{"msg" msg, "details": {"missing_labels": missing}}] {
+                provided := {label | input.request.object.metadata.labels[label]}
+                required := {label | label := ["bill"]}
+                missing := required - provided
+                count(missing) > 0 
+                msg := sprintf("you must provide labels: %v", [missing])
+        }
+
+2. Where do i want to enforce this requirements:
+I want them to be enforced on a kubernetes admission controller. specifying the target is easy which is always going to be the `target: admission.k8s.gatekeeper.sh` . 
+
+3. How do i specify what to check and what action to take:
+Whenever an objct is created in the `payroll` namespace, ensure it has a bill label attached to it. whenever the request to create an object in the payroll namespace, comes through the admission controller, it checks to see if object has the appropriate label tagged to it.
+
+The above code will only work for a case where we want objects to have `bill` label, but if we want to use this implementation for any other label we can make use of a constraint template. This is similar to manifest files we use in creating kubernetes resources. 
+
+Example of constraint template:
+
+apiVersion: [templates.gatekeeper.sh/v1beta1](http://templates.gatekeeper.sh/v1beta1)
+kind: ConstraintTemplate
+metadata:
+ name: k8srequiredlabels
+spec:
+ crd:
+ spec:
+ names:
+ kind: K8sRequiredLabels
+ listKind: K8sRequiredLabelsList
+ plural: k8srequiredlabels
+ singular: k8srequiredlabels
+ validation:
+         # Schema for the `parameters` field
+ openAPIV3Schema:
+ properties:
+ labels:
+ type: array
+ items: string
+ targets:
+ - target: [admission.k8s.gatekeeper.sh](http://admission.k8s.gatekeeper.sh)
+ rego: |
+ package k8srequiredlabels
+
+ deny[{"msg": msg, "details": {"missing_labels": missing}}] {
+ provided := {label | input.review.object.metadata.labels[label]}
+ required := {label | label := input.parameters.labels[_]}
+ missing := required - provided
+ count(missing) > 0
+ msg := sprintf("you must provide labels: %v", [missing])
+ }
+
+Secrets:
+Secret is a kubernetes resource that is used to store sensitive information such as keys, passwords etc. They are similar to config maps except that they are stored in an encoded or hashed format.
+Using a secret involves two steps:
+1. create the secret.
+2. Inject it into a pod.
+
+We can create a secret either imperatively or using a declarative file. To create a secret with imperative command:
+
+        kubectl create secret -n <namespace> <secret name> generic --from-literal=DB_Host=mysql --from-literal=DB_User=root --from-literal=DB_password=passwd
+
+This is example of creating a secret that contains login credential of a mysql server. You can also create a secret from a file too by specifying the path to the file. To view ways you can create secrets run:
+
+        kubectl create secret --help 
+
+To parse in your secret into a pod, specify the name of the secret under the container section in the specification of the pod definition file.
+
+        spec:
+          containers:
+          - name: web
+            image: nginx
+            envFrom: 
+            - secretRef: 
+                name: <secret-name>
+
+Notes On Secrets: 
+1. They ae not encrypted, only encoded which technically means that they are still vulnerable without encryption.
+2. Do not check-in secret objects to SCM along with code.
+3. Also, secrets are not encrypted in etcd, so consider encrypting secret data at rest.
+4. Anyone able to create pods/deployments in the same namespace as the secrets have access to the secrets.
+5. Consider third part secret store providers.
+6. Configure least-priviledge access to secrets -RBAC
+
+Improving isolation of containers using sandboxing techniques:
+Containers and their hosts both share the same kernel on the machine, from the perspective of the host, its just another process that is isolated from the host. We also know that all containers running on a host machine make use of the users space, because they need to make use of the servers hardware resources, which technically means they have to make system calls. This is a problem because every container in a server makes use of the same kernel as the host, they both make syscalls to the same kernel to function properly. Attackers can probably hop into your system through a backdoor of your containers running on your system and damage things inside.
+
+Sandboxing: 
+Providing a solution to the problem mentioned earlier, implementation of sandbox.
+What is sandboxing?
+Sandboxing is simply a method of isolating a program from the rest of the system. An example of sandboxing is seccomp (Default seccomp profile for Docker, AppArmor.),AppArmor etc.
+
+gVisor:
+For our containerized applications, we need a stronger method of isolation between containers and the linux kernel. We plan to restrict containers from making direct system calls to the linux kernel. Thats where gVisor comes in. gVisor is a tool from google that allows an additional layer of isolation between the container and the kernel. Using the gVisor, when containers want to make calls to the kernel, it sends the request to the gVisor instead.
+Two major components of the gvisor:
+
+1. The Sentry: This is an indepedent application level kernel which is dedicated to containers. The main purpose of the sentry is to intercept and respond to system calls which are made by containers. The sentry is like the middle man sitting between the operating system and containers,guarding against any potential abuse. 
+
+Each container sitting on a host machine has its own dedicated gVisor kernel. This means that each container will be isolated in its own sandbox which drastically reduce the attack surface.
+
+Two disadvantages of using the gVisor:
+1. Not all applications will work on it.
+2. Since there are too many processes involved in making a syscall, it will make your application slower.
+
+Container--->syscall-->gVisor--->Linux Kernel--->Hardware.
+
+KATA CONTAINERS:
+Kata Containers is another way to perform container isolation in a system. Unllike the gVisor, kata container installs each container into its own virtual machine which means each container will have its own kernel. The virtual machine created by kata containers are lightweight  and are more focused on performance. each container will consume compute resources and more memory of the system so you will need a big system to perform this method of isolation. Since kata containers need hardware virtualization support, it might not be able to run on typical service providers because not all support nested virtualization. 
+
+NOTE:
+The gVisor makes use of the runsc container runtime to create containers.
+
+How to use container runtime to create pods in kubernetes:
+For a cluster that already have kubernetes installed in them, we can create a runtime class with (runsc) as the handler.
+To enable gVisor on your minikube:
+
+        minikube start --container-runtime=containerd  \
+    --docker-opt containerd=/var/run/containerd/containerd.sock
+
+         minikube addons enable gvisor
+
+         kubectl get pod,runtimeclass gvisor -n kube-system
+
+This method is for minikube environment. 
+
+Let's say we want to enable gVisor as our runtime using manifest file:
+
+        # RuntimeClass is defined in the node.k8s.io API group
+        apiVersion: node.k8s.io/v1
+        kind: RuntimeClass
+        metadata:
+         # The name the RuntimeClass will be referenced by.
+         # RuntimeClass is a non-namespaced resource.
+         name: gVisor
+        # The name of the corresponding CRI configuration
+        handler: runsc
+
+Use the `kubectl create -f <manifest.yaml>` to create the  runtime class.
+
+To use a runtime to create a pod in our cluster we specify the runtime class name in the pod definition file under the spec section, like this:
+        spec:
+
+         runtimeClassName: gVisor
+         containers:
+         - image: nginx
+           name: nginx
+
+After creating the pod, you can test if the pod is running on the system by checking for the process using `pgrep`:
+
+        pgrep -a nginx
+
+Note: the default container used by k8s is `runc`.
+
+Mutual SSL: Implementation of mTLS to secure pod to pod communication.
+By default, data transmitted between two pods is uncrypted, if a pods needs data from another pod, it talks to the network connecting both pods together. This open problem, can be solved by implementing mTLS between pods. 
+
+Pod A requests data from pod B, A sends certificate to B for B to verify,both pods request for certificates and verifies them seperately, after verifying, they make use of symmetric keys to encrypt data, this will help them have a secure communication between both pods. Pod A will have the key of B and vice versa for the purpose of an encrypted communication. 
+Doing this on all pods seems difficult so implemenenting a third party program such as istio and linkerd. These programs allow service to service communication without depending on the application. this process is known as a service mesh, simply connecting multiple services together in a microsevice architecture.
+
+We have two containers, A and B, the istio runs a side car container on both pods. When pod a wants to send data to B, the side car on A encrypts the data and forwards the data over a network. On getting to pod B, the istio sidecar on B decrypts the data and then passes it to the app running on the pod.
+
+SUPPLY CHAIN SECURITY.
+
+Minimize Base Image Footprint.
+Rules to follow when building images:
+1. Do not build an image that combines multiple applications together, such as a web server, database or other services.
+
+2. Do not store data or state inside a container, find other ways to persist your data.
+
+3. When selecting a base image you must choose an image with authenticity, look for image that suits your application needs. 
+
+4. When creating images, they should be slim or minimal. This will allow images to be pulled faster from a remote repository.
+
+5. Do not allow unecessary files in your images and remove unwanted packages in your image.
+
+6. Run vulnerability scanning on images.
+
+Image Security:
+When we run containers on our cluster and we make use of images in the offical docker registry such as nginx, they all come from the library account which is the official account of docker that manages official images like the nginx. Same way you specify your account name when you try to pull your custom image to run your application on docker or kubernetes.
+We can privatize our images by storing them in private registry like cloud AWS private registry. But how do we pull this applications? all we need is the credentials of the private registry and the server address of where they are stored:
+
+                apiVersion: v1
+                kind: Pod
+                metadata:
+                  name: private-reg
+                spec:
+                 containers:
+                 - name: private-reg-container
+                   image: <your-private-image>
+                 imagePullSecrets:
+                  - name: regcred
+
+To configure the credentials for the private registry holding your private image, we make use of secretes:
+
+        kubectl create secret docker-registry regcred --docker-server=<your-registry-server> --docker-username=<your-name> --docker-password=<your-pword> --docker-email=<your-email>
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+And thats how you set configuration for private images.
 
