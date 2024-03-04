@@ -1183,3 +1183,119 @@ To configure the credentials for the private registry holding your private image
 
 And thats how you set configuration for private images.
 
+Whitelisting Allowed Registries:
+It is important to have governance on images, to ensure that images are pulled from a verified registry. how do we prevent users from pulling images from unwanted registries?
+We make use of admission controllers. We can create a policy to reject any image from unwanted registry and respond with an error message saying that the image is invalid. This is done by deploying a webhook server just as mentioned earlier.
+Another option is deploying a OPA service and cofiguring a validating webhook to connect to the service and then creating policies to restrict untrusted registries using the `rego` tool. 
+We can also use the built-in imagePolicyWebhook admission controller. 
+To make use of ImagePolicyWebhook controller, you must first deploy a validating webhook server, then we can then create an admission configuration resouce:
+
+        apiVersion: apiserver.config.k8s.io/v1
+        kind: AdmissionConfiguration
+        plugins:
+        - name: ImagePolicyWebhook
+        configuration:
+           imagePolicy:
+          kubeConfigFile: <path-to-kubeconfig-file>
+          allowTTL: 50
+                denyTTL: 50
+                retryBackoff: 500
+                defaultAllow: true
+
+For the kube-config file, we have to specify the kube-config file that's carrying the certificates, keys for the webhook server and the endpoint of the wbehook server. all these will be mentioned in the requested kube config file.                
+
+        # clusters refers to the remote service.
+        clusters:
+        - name: name-of-remote-imagepolicy-service
+        cluster:
+        certificate-authority: /path/to/ca.pem    # CA for verifying the remote service.
+        server: https://images.example.com/policy # URL of remote service to query. Must use 'https'.
+
+        # users refers to the API server's webhook configuration.
+        users:
+         - name: name-of-api-server
+            user:
+            client-certificate: /path/to/cert.pem # cert for the webhook admission controller to use
+            client-key: /path/to/key.pem          # key matching the cert
+
+After creating the admission configuration, we enable `imagePolicyWebhook` in the kube-apiserver manifest file:
+
+        - --enable-admission-plugins=ImagePolicyWebhook
+
+Analyzing Kubernetes resource definition files:
+With static analysis,we review the resource files and enforce policies earlier in the development cycle before deploying to the cluster. We make use of a tool called `kubesec` . This tool helps analyze a given resource definition file and returns a score along with details about a critical issue that were found in it.
+
+Install kubesec: 
+        wget https://github.com/controlplaneio/kubesec/releases/download/v2.14.0/kubesec_linux_amd64.tar.gz
+        tar -xvf kubesec_linux_amd64.tar.gz
+        sudo mv kubesec /usr/local/bin
+
+To test, check your deployment files:
+
+        kubesec scan <file.yaml>
+
+Scan Images for known vulnerabilities:
+CVEs: common Vulnerabilities and Exposures.
+CVEs is like a database that contain bugs of softwares and propose a solution to it. They help other engineers or developers avoid these bugs. This way, attackers don't get to hack into your system because of the preventive measures or solution provided by CVEs. The central database makes it easier for to find information concerning a certain bug, report bugs and avoid duplicate entries. 
+The bugs discussed above can be anything that allows an attacker to bypass security checks and do things they aren't allowed to do. Another bug would be anything that allows an attacker to mess up your system or seriously degrade your system performance.
+
+The CVE severity score helps us priortize what to care about and what not. The score displays the level of security of our system with the range of 1-10. If its high, there's a big problem, a low score is still a problem but not too much. This threats might be a result of  having excess packages that are not used in our containers or applications. Container scanners help look for vulnerability in the execution environment and tells you what vulnerablities they are known to have.
+A solution to reduce attack surface is by removing unnecessary packages.
+
+Trivy: an aquasecurity comprehensiv vulnerability scanner for containers and other artifacts and is suitable for integration with CICD pipelines. All you need to is present the name of the image you want to scan, it runs a vulnerabilty scan and returns a summary of all vulnerabilities detected in that image:
+
+        trivy image <image name>
+        #scan and display a severity-level.
+        trivy image --severity <severity-level> <image-name>
+
+        trivy image ignore-unfixed <image-name>
+
+        #scan image in a tar archive file.
+
+        trivy image --input <tar-file>
+
+Best practices:
+1. continuously rescan images.
+2. Kubernetes admission controllers to scan images.
+3. Have your own repository with pre-scanned images ready to go.
+4. Integrate scanning into your CICD pipelines.
+
+
+Monitoring, Logging and Runtime Security.
+================================================================================
+
+Perform behavioural analytics of syscalls.
+In a system, if a breach occurs it is important that we react as soon as possible, we can prevent damage from spreading into other systems. How do we identify breaches in our kubernetes cluster?
+Tools like Falco helps us to analyze syscalls that are used by an application inside a pod. Falco helps us to aanalyze these syscalls and filter events that are suspicious. 
+Falco sits in the middle between the linux kernel space and user space with the use of a kernel module. Falco also interact with the kernel through EBPF(extended berkeley packet filter). The system calls are then analyzed by the sysdig libraries in the userspace, events are filtered by falco policy engine by making use of predefined rules that can detect whether the event was suspicious or not.  
+We can install falco as a service on all nodes and also as daemonset on our kubernetes cluster,an advantage of installing falco as a service on nodes is that it can isolate itself from the cluster if its compromised.
+Installing falco:
+        curl -fsSL https://falco.org/repo/falcosecurity-packages.asc | \
+  sudo gpg --dearmor -o /usr/share/keyrings/falco-archive-keyring.gpg
+
+        echo "deb [signed-by=/usr/share/keyrings/falco-archive-keyring.gpg] https://download.falco.org/packages/deb stable main" | \
+        sudo tee -a /etc/apt/sources.list.d/falcosecurity.list
+
+        sudo apt-get update -y
+
+        sudo apt install -y dkms make linux-headers-$(uname -r)
+        # If you use falcoctl driver loader to build the eBPF probe locally you need also clang toolchain
+        sudo apt install -y clang llvm
+        # You can install also the dialog package if you want it
+        sudo apt install -y dialog
+
+        sudo apt-get install -y falco
+
+In falco,we make use of rules to create alerts when an is considered as an anomaly. 
+Falco default rules: 
+- A shell opened inside your container.
+- sensitive files such as /etc/passwd were read inside the container.
+
+Falco rule yaml file contains 3 elements:
+rule: defines condition under which alert should be triggered and it consist of 5 mandatory keys. name(rule),description, condition,output and priority
+
+
+
+
+
+
